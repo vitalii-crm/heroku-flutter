@@ -8,7 +8,6 @@ function print() {
   echo "-----> $1"
 }
 
-
 # Taken from https://devcenter.heroku.com/articles/buildpack-api#bin-compile-summary
 function export_env_dir() {
   env_dir=$1
@@ -38,49 +37,73 @@ mkdir -p $CACHE_DIR
 
 cd $BUILD_DIR
 
+JAVA_VERSION=21
+print "Heroku release version $HEROKU_RELEASE_VERSION"
+
 if [ -d $CACHE_DIR/flutter ]; then
   print "Restoring Flutter SDK from CACHE"
   cp -R $CACHE_DIR/flutter $BUILD_DIR
+
+  # Load installed Flutter SDK version
+  INSTALLED_FLUTTER_VERSION=$(flutter/bin/flutter --version --machine 2>/dev/null | grep -o '"frameworkVersion": *"[^"]*' | grep -o '[^"]*$')
+  print "Installed Flutter SDK version: $INSTALLED_FLUTTER_VERSION"
+
+  if [ -n "$FLUTTER_VERSION" ] && [ "$FLUTTER_VERSION" != "$INSTALLED_FLUTTER_VERSION" ]; then
+    print "Cached version $INSTALLED_FLUTTER_VERSION does not match the required version $FLUTTER_VERSION"
+    print "Installing Flutter SDK version: $FLUTTER_VERSION"
+
+    # Remove old cached Flutter SDK
+    rm -rf flutter
+
+    # Clone specific Flutter version
+    git clone https://github.com/flutter/flutter.git -b $FLUTTER_VERSION --depth 1 --quiet
+
+  else
+    print "Cached Flutter SDK version matches the required version or no version specified."
+  fi
 else
-  print "Installing SDK from Github repository."
-  git clone https://github.com/flutter/flutter.git --quiet
+  print "Flutter SDK is not in CACHE."
+
+  if [ -n "$FLUTTER_VERSION" ]; then
+    print "Installing specific Flutter SDK version: $FLUTTER_VERSION"
+    git clone https://github.com/flutter/flutter.git -b $FLUTTER_VERSION --depth 1 --quiet
+  else
+    print "Installing latest stable Flutter SDK"
+    git clone https://github.com/flutter/flutter.git --quiet
+  fi
 fi
 
-# Check if FLUTTER_VERSION variables is set.
-if [ -n "$FLUTTER_VERSION" ]; then
-  # Load bash variables from flutter --machine --version and read it like  $FLUTTER_VERSION variable.
-  flutter/bin/flutter --machine --version > flutter.json
-  FLUTTER_INSTALLED_VERSION=$(grep -o '"frameworkVersion": *"[^"]*' flutter.json | grep -o '[^"]*$')
+# Add Flutter to PATH
+export PATH="$PWD/flutter/bin:$PATH"
 
-  # Check if the FLUTTER_VERSION is the same with the installed one.
-  if [ "$FLUTTER_VERSION" != "$FLUTTER_INSTALLED_VERSION" ]; then
-    print "Installing Flutter SDK version : $FLUTTER_VERSION"
-    flutter/bin/flutter version $FLUTTER_VERSION --quiet | indent
-  fi
-  rm flutter.json
-
-else
-  
-  print "Running flutter upgrade command"
-  if [ '${channel}' != 'stable' ];then
-    flutter/bin/flutter channel stable | indent
-  fi
-
-  flutter/bin/flutter upgrade --quiet | indent
-fi
 
 print "Enabling Web support"
-flutter/bin/flutter config --enable-web --quiet | indent
+flutter config --enable-web --quiet | indent
 
-print "Running flutter clean command."
-flutter/bin/flutter clean --quiet | indent
+print "Running flutter clean command"
+flutter clean --quiet | indent
 
 print "Getting packages from Flutter project"
-flutter/bin/flutter pub get --quiet | indent
+dart pub get | indent
 
-print "Compiling the project."
-flutter/bin/flutter build web --release --quiet | indent
-# --dart-define=FLUTTER_WEB_USE_EXPERIMENTAL_CANVAS_TEXT=true
+print "Running build_runner"
+
+echo "Installing Java version $JAVA_VERSION..."
+wget -q https://download.java.net/openjdk/jdk$JAVA_VERSION/ri/openjdk-$JAVA_VERSION+35_linux-x64_bin.tar.gz
+tar -xvzf openjdk-$JAVA_VERSION+35_linux-x64_bin.tar.gz > /dev/null 2>&1
+export JAVA_HOME="$PWD/jdk-$JAVA_VERSION"
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version
+
+dart run build_runner clean
+dart run build_runner build -d --delete-conflicting-outputs | indent
+
+rm -rf $JAVA_HOME
+unset JAVA_HOME
+export PATH=$(echo $PATH | sed -e 's|$JAVA_HOME/bin:||')
+
+print "Compiling the project"
+flutter build web --release --quiet | indent
 
 PUB_CACHE="$HOME/.pub-cache/"
 mkdir -p $PUB_CACHE
@@ -99,36 +122,43 @@ shopt -s extglob
 
 # Check  FLUTTER_CLEANUP var to delete all files or keep it.
 if [ "$FLUTTER_CLEANUP" != false ]; then
-    
+
   mkdir -p $BUILD_DIR/TO_DELETE
 
   mv !("TO_DELETE") TO_DELETE
   mv TO_DELETE/build/web/* $BUILD_DIR
   mv TO_DELETE/dart-sdk $BUILD_DIR
   rm -rf TO_DELETE
-  
+
 fi
 
 
-# Activate dhttpd dart package to run the server. 
-# Is taken from my Github repo because some variables need to be changed every run 
+# Activate dhttpd dart package to run the server.
+# Is taken from my Github repo because some variables need to be changed every run
 # like PORT from environment.
 
 if [ -d "$CACHE_DIR/.pub-cache/" ]; then
   print "dhttpd Found in cache. Restoring."
-  cp -R $CACHE_DIR/.pub-cache/* $PUB_CACHE  
+  cp -R $CACHE_DIR/.pub-cache/* $PUB_CACHE
 else
   print "Getting dhttpd to run web service."
   $BUILD_DIR/dart-sdk/bin/dart pub global activate -sgit https://github.com/lovaicv/dhttpd.git | indent
-  
+
   print "Getting dhtppd to run web service."
   mkdir -p $CACHE_DIR/.pub-cache/
   cp -R $PUB_CACHE/* $CACHE_DIR/.pub-cache/
 fi
 
 # Moving to the build, after running the compile. All will be deleted and removed to app directory.
-# Copying the result, the files will be kept in storage. 
+# Copying the result, the files will be kept in storage.
 cp -R $PUB_CACHE $BUILD_DIR
 
 export PATH="$PATH":"/app/dart-sdk/bin/"
 export PATH="$PATH":"/app/.pub-cache/bin"
+
+if [ -n "$TG_TOKEN" ]; then
+    print "Sending notification to Telegram"
+    curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+        -d chat_id="$TG_CHAT_ID" \
+        -d text="New deployment version $HEROKU_RELEASE_VERSION"
+fi

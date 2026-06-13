@@ -97,9 +97,9 @@ java -version
 dart run build_runner clean
 dart run build_runner build -d --delete-conflicting-outputs | indent
 
+export PATH=$(echo $PATH | sed -e "s|$JAVA_HOME/bin:||")
 rm -rf $JAVA_HOME
 unset JAVA_HOME
-export PATH=$(echo $PATH | sed -e 's|$JAVA_HOME/bin:||')
 
 print "Compiling the project"
 flutter build web --release --quiet | indent
@@ -140,10 +140,9 @@ if [ -d "$CACHE_DIR/.pub-cache/" ]; then
   print "dhttpd Found in cache. Restoring."
   cp -R $CACHE_DIR/.pub-cache/* $PUB_CACHE
 else
-  print "Getting dhttpd to run web service."
-  $BUILD_DIR/dart-sdk/bin/dart pub global activate -sgit https://github.com/lovaicv/dhttpd.git | indent
+  print "Getting dhttpd from pub.dev."
+  $BUILD_DIR/dart-sdk/bin/dart pub global activate dhttpd | indent
 
-  print "Getting dhtppd to run web service."
   mkdir -p $CACHE_DIR/.pub-cache/
   cp -R $PUB_CACHE/* $CACHE_DIR/.pub-cache/
 fi

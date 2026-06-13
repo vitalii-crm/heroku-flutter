@@ -137,15 +137,15 @@ fi
 # like PORT from environment.
 
 if [ -d "$CACHE_DIR/.pub-cache/" ]; then
-  print "dhttpd Found in cache. Restoring."
+  print "Restoring pub cache."
   cp -R $CACHE_DIR/.pub-cache/* $PUB_CACHE
-else
-  print "Getting dhttpd from pub.dev."
-  $BUILD_DIR/dart-sdk/bin/dart pub global activate dhttpd | indent
-
-  mkdir -p $CACHE_DIR/.pub-cache/
-  cp -R $PUB_CACHE/* $CACHE_DIR/.pub-cache/
 fi
+
+print "Getting dhttpd from pub.dev."
+$BUILD_DIR/dart-sdk/bin/dart pub global activate dhttpd | indent
+
+mkdir -p $CACHE_DIR/.pub-cache/
+cp -R $PUB_CACHE/* $CACHE_DIR/.pub-cache/
 
 # Moving to the build, after running the compile. All will be deleted and removed to app directory.
 # Copying the result, the files will be kept in storage.

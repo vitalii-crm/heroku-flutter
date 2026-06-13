@@ -144,6 +144,10 @@ fi
 print "Getting dhttpd from pub.dev."
 $BUILD_DIR/dart-sdk/bin/dart pub global activate dhttpd | indent
 
+# Remove old git-sourced dhttpd artifacts (read-only .git objects block cp)
+rm -rf $PUB_CACHE/git/dhttpd* $PUB_CACHE/git/cache/dhttpd*
+
+rm -rf $CACHE_DIR/.pub-cache/
 mkdir -p $CACHE_DIR/.pub-cache/
 cp -R $PUB_CACHE/* $CACHE_DIR/.pub-cache/
 
